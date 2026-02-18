@@ -25,6 +25,7 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.text.StringEscapeUtils;
 import org.apache.thrift.TException;
 import org.eclipse.sw360.datahandler.common.CommonUtils;
+import org.eclipse.sw360.datahandler.common.SW360ConfigKeys;
 import org.eclipse.sw360.datahandler.common.SW360Constants;
 import org.eclipse.sw360.datahandler.couchdb.lucene.NouveauLuceneAwareDatabaseConnector;
 import org.eclipse.sw360.datahandler.resourcelists.ResourceClassNotFoundException;
@@ -34,6 +35,7 @@ import org.eclipse.sw360.datahandler.thrift.PaginationData;
 import org.eclipse.sw360.datahandler.thrift.users.RestApiToken;
 import org.eclipse.sw360.datahandler.thrift.users.User;
 import org.eclipse.sw360.datahandler.thrift.users.UserGroup;
+import org.eclipse.sw360.rest.resourceserver.configuration.SW360ConfigurationsService;
 import org.eclipse.sw360.rest.resourceserver.core.BadRequestClientException;
 import org.eclipse.sw360.rest.resourceserver.core.HalResource;
 import org.eclipse.sw360.rest.resourceserver.core.OpenAPIPaginationHelper;
@@ -96,13 +98,16 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
     @NonNull
     private final RestControllerHelper restControllerHelper;
 
+    @NonNull
+    private final SW360ConfigurationsService sw360ConfigurationsService;
+
     private static final ImmutableSet<User._Fields> setOfUserProfileFields =
             ImmutableSet.<User._Fields>builder().add(User._Fields.WANTS_MAIL_NOTIFICATION)
                     .add(User._Fields.NOTIFICATION_PREFERENCES).build();
 
     @Operation(summary = "List all of the service's users.",
             description = "List all of the service's users.", tags = {"Users"})
-    @RequestMapping(value = USERS_URL, method = RequestMethod.GET)
+    @GetMapping(value = USERS_URL)
     public ResponseEntity<CollectionModel<EntityModel<User>>> getUsers(
             @Parameter(description = "Pagination requests", schema = @Schema(implementation = OpenAPIPaginationHelper.class))
             Pageable pageable,
@@ -165,7 +170,7 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
     // for compatibility with older version of the REST API
     @Operation(summary = "Get a single user.", description = "Get a single user by email.",
             tags = {"Users"})
-    @RequestMapping(value = USERS_URL + "/{email:.+}", method = RequestMethod.GET)
+    @GetMapping(value = USERS_URL + "/{email:.+}")
     public ResponseEntity<EntityModel<User>> getUserByEmail(
             @Parameter(description = "The email of the user to be retrieved.")
             @PathVariable("email") String email
@@ -182,7 +187,7 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
     // getUserByEmail())
     @Operation(summary = "Get a single user.", description = "Get a single user by id.",
             tags = {"Users"})
-    @RequestMapping(value = USERS_URL + "/byid/{id:.+}", method = RequestMethod.GET)
+    @GetMapping(value = USERS_URL + "/byid/{id:.+}")
     public ResponseEntity<EntityModel<User>> getUser(
             @Parameter(description = "The id of the user to be retrieved.")
             @PathVariable("id") String id
@@ -267,7 +272,7 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
             description = "List all of rest api tokens of current user.",
             responses = {@ApiResponse(responseCode = "200", description = "List of tokens.")},
             tags = {"Users"})
-    @RequestMapping(value = USERS_URL + "/tokens", method = RequestMethod.GET)
+    @GetMapping(value = USERS_URL + "/tokens")
     public ResponseEntity<CollectionModel<EntityModel<RestApiToken>>> getUserRestApiTokens() {
         final User sw360User = restControllerHelper.getSw360UserFromAuthentication();
         List<RestApiToken> restApiTokens = sw360User.getRestApiTokens();
@@ -289,7 +294,7 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
                     @ApiResponse(responseCode = "500", description = "Create token failure.")
             },
             tags = {"Users"})
-    @RequestMapping(value = USERS_URL + "/tokens", method = RequestMethod.POST)
+    @PostMapping(value = USERS_URL + "/tokens")
     public ResponseEntity<String> createUserRestApiToken(
             @Parameter(description = "Token request",
                     schema = @Schema(
@@ -307,7 +312,14 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
     ) throws TException {
         User sw360User = restControllerHelper.getSw360UserFromAuthentication();
         RestApiToken restApiToken = userService.convertToRestApiToken(requestBody, sw360User);
-        String token = RandomStringUtils.random(20, true, true);
+        String tokenLengthStr = sw360ConfigurationsService.getSW360Configs()
+                .get(SW360ConfigKeys.REST_API_TOKEN_LENGTH);
+        if (CommonUtils.isNullEmptyOrWhitespace(tokenLengthStr)) {
+            throw new BadRequestClientException(
+                    "API token length is not configured. Please set '" + SW360ConfigKeys.REST_API_TOKEN_LENGTH + "' in SW360 configurations.");
+        }
+        int tokenLength = Integer.parseInt(tokenLengthStr);
+        String token = RandomStringUtils.secure().nextAlphanumeric(tokenLength);
         restApiToken.setToken(BCrypt.hashpw(token, API_TOKEN_HASH_SALT));
         sw360User.addToRestApiTokens(restApiToken);
         userService.updateUser(sw360User);
@@ -321,7 +333,7 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
                     @ApiResponse(responseCode = "204", description = "Revoke token successfully."),
                     @ApiResponse(responseCode = "404", description = "Token name not found.")},
             tags = {"Users"})
-    @RequestMapping(value = USERS_URL + "/tokens", method = RequestMethod.DELETE)
+    @DeleteMapping(value = USERS_URL + "/tokens")
     public ResponseEntity<String> revokeUserRestApiToken(
             @Parameter(description = "Name of token to be revoked.",
                     example = "MyToken")
@@ -358,7 +370,7 @@ public class UserController implements RepresentationModelProcessor<RepositoryLi
                                 "secondaryGrpList": ["DEPARTMENT1","DEPARTMENT2"]
                             }
                             """))})})
-    @RequestMapping(value = USERS_URL + "/groupList", method = RequestMethod.GET)
+    @GetMapping(value = USERS_URL + "/groupList")
     public ResponseEntity<Map<String, List<String>>> getGroupList() {
         User sw360User = restControllerHelper.getSw360UserFromAuthentication();
         List<String> primaryGrpList = new ArrayList<>();
